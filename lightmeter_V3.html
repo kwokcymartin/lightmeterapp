@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>iPad Light Meter (Front)</title>
+    <style>
+        :root {
+            --bg-color: #000000;
+            --text-color: #ffffff;
+            --accent-color: #0A84FF;
+            --panel-bg: #1C1C1E;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* 
+           FIX: We keep the video 1x1 pixel and transparent.
+           If we use display:none or visibility:hidden, Safari 
+           stops sending frame data to save battery.
+        */
+        #videoSource, #analysisCanvas {
+            position: fixed;
+            bottom: 0;
+            right: 0;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* Main Display */
+        .meter-display {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .value-group {
+            margin-bottom: 30px;
+        }
+
+        .label {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 5px;
+        }
+
+        .main-value {
+            font-size: 72px;
+            font-weight: 200;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .sub-value {
+            font-size: 32px;
+            font-weight: 300;
+            color: #ccc;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Controls Container */
+        .controls {
+            width: 85%;
+            max-width: 500px;
+            background-color: var(--panel-bg);
+            padding: 25px;
+            border-radius: 18px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+
+        /* Slider Styling */
+        .slider-container {
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .slider-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 28px;
+            width: 28px;
+            border-radius: 50%;
+            background: #ffffff;
+            cursor: pointer;
+            margin-top: -12px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #444;
+            border-radius: 2px;
+        }
+
+        /* Start Button */
+        #startBtn {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 30px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: opacity 0.2s;
+        }
+
+        #startBtn:active {
+            opacity: 0.7;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .status {
+            font-size: 12px;
+            color: #555;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Hidden Processing Elements -->
+    <video id="videoSource" playsinline autoplay muted></video>
+    <canvas id="analysisCanvas"></canvas>
+
+    <!-- Start Screen -->
+    <button id="startBtn">Start Light Meter (Front Cam)</button>
+
+    <!-- Main UI (Initially Hidden) -->
+    <div id="interface" class="hidden">
+        <div class="meter-display">
+            <div class="value-group">
+                <div class="label">Illuminance</div>
+                <div class="main-value"><span id="luxVal">0</span> <span style="font-size:24px; color:#666">lx</span></div>
+            </div>
+            <div class="value-group">
+                <div class="label">Exposure Value (EV)</div>
+                <div class="sub-value" id="evVal">0.0</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="slider-container">
+                <div class="slider-header">
+                    <span>CALIBRATION OFFSET</span>
+                    <span id="calibDisplay">1.0x</span>
+                </div>
+                <input type="range" id="calibSlider" min="0.1" max="5.0" step="0.1" value="1.0">
+            </div>
+            <div style="font-size: 12px; color: #666; line-height: 1.4;">
+                <strong>Note:</strong> Using Front Camera. Point the screen toward the light source you want to measure.
+            </div>
+        </div>
+    </div>
+
+    <div class="status" id="statusText">Camera access required</div>
+
+    <script>
+        const video = document.getElementById('videoSource');
+        const canvas = document.getElementById('analysisCanvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const startBtn = document.getElementById('startBtn');
+        const ui = document.getElementById('interface');
+        const statusText = document.getElementById('statusText');
+        
+        const luxDisplay = document.getElementById('luxVal');
+        const evDisplay = document.getElementById('evVal');
+        
+        const calibSlider = document.getElementById('calibSlider');
+        const calibDisplay = document.getElementById('calibDisplay');
+        let calibrationFactor = 1.0;
+
+        const PROCESS_INTERVAL = 150; 
+        const CANVAS_SIZE = 64; 
+
+        calibSlider.addEventListener('input', (e) => {
+            calibrationFactor = parseFloat(e.target.value);
+            calibDisplay.textContent = calibrationFactor.toFixed(1) + 'x';
+        });
+
+        startBtn.addEventListener('click', async () => {
+            try {
+                // Request Front Camera ('user')
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        facingMode: 'user', // <--- CHANGED HERE
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                    audio: false
+                });
+
+                video.srcObject = stream;
+                
+                video.onloadedmetadata = () => {
+                    startBtn.classList.add('hidden');
+                    ui.classList.remove('hidden');
+                    statusText.textContent = "Analyzing light hitting front sensor...";
+                    
+                    canvas.width = CANVAS_SIZE;
+                    canvas.height = CANVAS_SIZE;
+                    
+                    setInterval(analyzeFrame, PROCESS_INTERVAL);
+                };
+
+            } catch (err) {
+                console.error(err);
+                statusText.textContent = "Error: " + err.message;
+                alert("Could not access camera. Please ensure you are using Safari and have granted permission.");
+            }
+        });
+
+        function analyzeFrame() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                ctx.drawImage(video, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+                const frame = ctx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+                const data = frame.data;
+                let totalLuminance = 0;
+                const pixelCount = data.length / 4;
+
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    
+                    const luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
+                    totalLuminance += luminance;
+                }
+
+                const avgLuminance = totalLuminance / pixelCount; 
+
+                // LUX Calc
+                let rawLux = (avgLuminance / 255) * 500; 
+                rawLux = Math.pow(rawLux, 1.5); 
+
+                const finalLux = rawLux * calibrationFactor * 10; 
+
+                // EV Calc
+                let ev = 0;
+                if (finalLux > 0) {
+                    ev = Math.log2(finalLux / 2.5);
+                }
+
+                luxDisplay.textContent = Math.round(finalLux);
+                evDisplay.textContent = ev.toFixed(1);
+            }
+        }
+    </script>
+</body>
+</html>
