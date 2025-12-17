@@ -1,304 +1,267 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>iPad Light Meter (Front)</title>
-    <style>
-        :root {
-            --text-color: #ffffff;
-            --accent-color: #0A84FF;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>iPad Light Meter</title>
+  <style>
+    :root{
+      --text-color:#fff;
+      --accent:#0A84FF;
+      --panel:rgba(28,28,30,0.85);
+    }
+    body{
+      margin:0;
+      height:100vh;
+      overflow:hidden;
+      background:#000;
+      color:var(--text-color);
+      font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      -webkit-font-smoothing:antialiased;
+    }
 
-        body {
-            background-color: #000;
-            color: var(--text-color);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            -webkit-font-smoothing: antialiased;
-        }
+    /* Live video background (front camera mirrored like selfie) */
+    #videoSource{
+      position:fixed;
+      inset:0;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      z-index:-2;
+      transform:scaleX(-1);
+    }
+    .video-overlay{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,0.6);
+      z-index:-1;
+    }
 
-        /* VIDEO BACKGROUND */
-        #videoSource {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover; /* Ensures video fills screen */
-            z-index: -2;
-            transform: scaleX(-1); /* Mirror effect for front camera */
-        }
+    /* Canvas can be hidden (it still works because the video is visible/rendered) */
+    #analysisCanvas{
+      position:absolute;
+      top:-9999px;
+      left:-9999px;
+      width:1px;
+      height:1px;
+      opacity:0;
+      pointer-events:none;
+    }
 
-        /* Dark overlay to make text readable against video */
-        .video-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.6); /* 60% darkness */
-            z-index: -1;
-        }
+    #startBtn{
+      background:var(--accent);
+      color:#fff;
+      border:0;
+      padding:15px 40px;
+      font-size:18px;
+      border-radius:30px;
+      font-weight:600;
+      cursor:pointer;
+      z-index:10;
+    }
+    #startBtn:active{ opacity:0.75; }
 
-        /* Hidden analysis canvas */
-        #analysisCanvas {
-            position: absolute;
-            top: -9999px;
-            left: -9999px;
-            visibility: hidden; 
-        }
+    .hidden{ display:none !important; }
 
-        /* Main Display */
-        .meter-display {
-            text-align: center;
-            margin-bottom: 40px;
-            text-shadow: 0 2px 10px rgba(0,0,0,0.5); /* Shadow for better contrast */
-        }
+    .meter-display{
+      text-align:center;
+      margin-bottom:24px;
+      text-shadow:0 2px 10px rgba(0,0,0,0.55);
+    }
+    .label{
+      font-size:14px;
+      text-transform:uppercase;
+      letter-spacing:1px;
+      color:rgba(255,255,255,0.8);
+      margin-bottom:6px;
+    }
+    .main-value{
+      font-size:72px;
+      font-weight:200;
+      font-variant-numeric:tabular-nums;
+      line-height:1;
+    }
+    .unit{
+      font-size:22px;
+      color:rgba(255,255,255,0.6);
+      margin-left:8px;
+      font-weight:400;
+    }
 
-        .value-group {
-            margin-bottom: 30px;
-        }
+    .controls{
+      width:85%;
+      max-width:520px;
+      background:var(--panel);
+      backdrop-filter:blur(18px);
+      -webkit-backdrop-filter:blur(18px);
+      border:1px solid rgba(255,255,255,0.10);
+      border-radius:18px;
+      box-shadow:0 4px 20px rgba(0,0,0,0.5);
+      padding:18px 18px 22px 18px;
+      position:relative;
+      overflow:hidden;
+    }
 
-        .label {
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: rgba(255, 255, 255, 0.8);
-            margin-bottom: 5px;
-        }
+    .hint{
+      font-size:12px;
+      color:#b7b7b7;
+      line-height:1.35;
+    }
 
-        .main-value {
-            font-size: 72px;
-            font-weight: 200;
-            font-variant-numeric: tabular-nums;
-        }
+    /* 5-second progress bar */
+    .timer-bar{
+      width:0%;
+      height:2px;
+      background:var(--accent);
+      position:absolute;
+      bottom:0;
+      left:0;
+      transition:width 5s linear;
+    }
 
-        .sub-value {
-            font-size: 32px;
-            font-weight: 300;
-            color: rgba(255, 255, 255, 0.9);
-            font-variant-numeric: tabular-nums;
-        }
-
-        /* Controls Container */
-        .controls {
-            width: 85%;
-            max-width: 500px;
-            background-color: rgba(28, 28, 30, 0.85); /* Semi-transparent panel */
-            backdrop-filter: blur(20px); /* Blur effect (Apple style) */
-            -webkit-backdrop-filter: blur(20px);
-            padding: 25px;
-            border-radius: 18px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-
-        /* Slider Styling */
-        .slider-container {
-            width: 100%;
-            margin-bottom: 20px;
-        }
-
-        .slider-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-            font-size: 14px;
-            color: #ccc;
-        }
-
-        input[type=range] {
-            -webkit-appearance: none;
-            width: 100%;
-            background: transparent;
-        }
-
-        input[type=range]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            height: 28px;
-            width: 28px;
-            border-radius: 50%;
-            background: #ffffff;
-            cursor: pointer;
-            margin-top: -12px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-        }
-
-        input[type=range]::-webkit-slider-runnable-track {
-            width: 100%;
-            height: 4px;
-            cursor: pointer;
-            background: rgba(255,255,255,0.3);
-            border-radius: 2px;
-        }
-
-        /* Start Button */
-        #startBtn {
-            background-color: var(--accent-color);
-            color: white;
-            border: none;
-            padding: 15px 40px;
-            font-size: 18px;
-            border-radius: 30px;
-            cursor: pointer;
-            font-weight: 500;
-            transition: opacity 0.2s;
-            z-index: 10;
-        }
-
-        #startBtn:active {
-            opacity: 0.7;
-        }
-
-        .hidden {
-            display: none !important;
-        }
-
-        .status {
-            font-size: 12px;
-            color: rgba(255,255,255,0.6);
-            margin-top: 20px;
-            z-index: 10;
-        }
-    </style>
+    .status{
+      font-size:12px;
+      color:rgba(255,255,255,0.65);
+      margin-top:16px;
+      z-index:10;
+      text-shadow:0 2px 10px rgba(0,0,0,0.55);
+    }
+  </style>
 </head>
 <body>
 
-    <!-- Video Background -->
-    <video id="videoSource" playsinline autoplay muted></video>
-    <div class="video-overlay"></div>
-    
-    <canvas id="analysisCanvas"></canvas>
+  <video id="videoSource" playsinline autoplay muted></video>
+  <div class="video-overlay"></div>
 
-    <!-- Start Screen -->
-    <button id="startBtn">Start Light Meter (Front Cam)</button>
+  <canvas id="analysisCanvas"></canvas>
 
-    <!-- Main UI (Initially Hidden) -->
-    <div id="interface" class="hidden">
-        <div class="meter-display">
-            <div class="value-group">
-                <div class="label">Illuminance</div>
-                <div class="main-value"><span id="luxVal">0</span> <span style="font-size:24px; color:rgba(255,255,255,0.6)">lx</span></div>
-            </div>
-            <div class="value-group">
-                <div class="label">Exposure Value (EV)</div>
-                <div class="sub-value" id="evVal">0.0</div>
-            </div>
-        </div>
+  <button id="startBtn">Start Light Meter</button>
 
-        <div class="controls">
-            <div class="slider-container">
-                <div class="slider-header">
-                    <span>CALIBRATION OFFSET</span>
-                    <span id="calibDisplay">1.0x</span>
-                </div>
-                <input type="range" id="calibSlider" min="0.1" max="5.0" step="0.1" value="1.0">
-            </div>
-            <div style="font-size: 12px; color: #aaa; line-height: 1.4;">
-                <strong>Note:</strong> Using Front Camera. Point the screen toward the light source you want to measure.
-            </div>
-        </div>
+  <div id="interface" class="hidden">
+    <div class="meter-display">
+      <div class="label">Illuminance</div>
+      <div class="main-value">
+        <span id="luxVal">0</span><span class="unit">unit</span>
+      </div>
     </div>
 
-    <div class="status" id="statusText">Camera access required</div>
+    <div class="controls">
+      <div class="hint">Updates every 5 seconds. Point the camera at the scene you want to measure.</div>
+      <div id="timerBar" class="timer-bar"></div>
+    </div>
+  </div>
 
-    <script>
-        const video = document.getElementById('videoSource');
-        const canvas = document.getElementById('analysisCanvas');
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        const startBtn = document.getElementById('startBtn');
-        const ui = document.getElementById('interface');
-        const statusText = document.getElementById('statusText');
-        
-        const luxDisplay = document.getElementById('luxVal');
-        const evDisplay = document.getElementById('evVal');
-        
-        const calibSlider = document.getElementById('calibSlider');
-        const calibDisplay = document.getElementById('calibDisplay');
-        let calibrationFactor = 1.0;
+  <div class="status" id="statusText">Camera access required</div>
 
-        const PROCESS_INTERVAL = 3000; 
-        const CANVAS_SIZE = 64; 
+  <script>
+    const video = document.getElementById('videoSource');
+    const canvas = document.getElementById('analysisCanvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-        calibSlider.addEventListener('input', (e) => {
-            calibrationFactor = parseFloat(e.target.value);
-            calibDisplay.textContent = calibrationFactor.toFixed(1) + 'x';
+    const startBtn = document.getElementById('startBtn');
+    const ui = document.getElementById('interface');
+    const statusText = document.getElementById('statusText');
+
+    const luxDisplay = document.getElementById('luxVal');
+    const timerBar = document.getElementById('timerBar');
+
+    // Settings
+    const PROCESS_INTERVAL = 5000; // 5 seconds
+    const CANVAS_SIZE = 64;
+
+    // Keep calibration fixed (slider removed)
+    const calibrationFactor = 1.0;
+
+    let intervalId = null;
+
+    startBtn.addEventListener('click', async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',        // front camera
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          },
+          audio: false
         });
 
-        startBtn.addEventListener('click', async () => {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { 
-                        facingMode: 'user', 
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    },
-                    audio: false
-                });
+        video.srcObject = stream;
 
-                video.srcObject = stream;
-                
-                video.onloadedmetadata = () => {
-                    startBtn.classList.add('hidden');
-                    ui.classList.remove('hidden');
-                    statusText.textContent = ""; // Clear text
-                    
-                    canvas.width = CANVAS_SIZE;
-                    canvas.height = CANVAS_SIZE;
-                    
-                    setInterval(analyzeFrame, PROCESS_INTERVAL);
-                };
+        video.onloadedmetadata = async () => {
+          // Some iOS/Safari builds behave better if play() is called explicitly
+          try { await video.play(); } catch (e) {}
 
-            } catch (err) {
-                console.error(err);
-                statusText.textContent = "Error: " + err.message;
-                alert("Could not access camera. Please ensure you are using Safari and have granted permission.");
-            }
+          startBtn.classList.add('hidden');
+          ui.classList.remove('hidden');
+          statusText.textContent = '';
+
+          canvas.width = CANVAS_SIZE;
+          canvas.height = CANVAS_SIZE;
+
+          // Update immediately, then every 5 seconds
+          analyzeFrame();
+          if (intervalId) clearInterval(intervalId);
+          intervalId = setInterval(analyzeFrame, PROCESS_INTERVAL);
+
+          // Start the progress bar
+          restartTimerBar();
+        };
+
+      } catch (err) {
+        statusText.textContent = "Error: " + err.message;
+        alert("Could not access camera. Make sure you're on HTTPS and camera permission is allowed.");
+      }
+    });
+
+    function restartTimerBar() {
+      timerBar.style.transition = 'none';
+      timerBar.style.width = '0%';
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          timerBar.style.transition = `width ${PROCESS_INTERVAL}ms linear`;
+          timerBar.style.width = '100%';
         });
+      });
+    }
 
-        function analyzeFrame() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                ctx.drawImage(video, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    function analyzeFrame() {
+      if (video.readyState >= video.HAVE_ENOUGH_DATA) {
+        ctx.drawImage(video, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
-                const frame = ctx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-                const data = frame.data;
-                let totalLuminance = 0;
-                const pixelCount = data.length / 4;
+        const frame = ctx.getImageData(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+        const data = frame.data;
 
-                for (let i = 0; i < data.length; i += 4) {
-                    const r = data[i];
-                    const g = data[i + 1];
-                    const b = data[i + 2];
-                    
-                    const luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
-                    totalLuminance += luminance;
-                }
+        let totalLuminance = 0;
+        const pixelCount = data.length / 4;
 
-                const avgLuminance = totalLuminance / pixelCount; 
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
 
-                let rawLux = (avgLuminance / 255) * 500; 
-                rawLux = Math.pow(rawLux, 1.5); 
-
-                const finalLux = rawLux * calibrationFactor * 10; 
-
-                let ev = 0;
-                if (finalLux > 0) {
-                    ev = Math.log2(finalLux / 2.5);
-                }
-
-                luxDisplay.textContent = Math.round(finalLux);
-                evDisplay.textContent = ev.toFixed(1);
-            }
+          // luminance = 0.2126*R + 0.7152*G + 0.0722*B
+          totalLuminance += (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
         }
-    </script>
+
+        const avgLuminance = totalLuminance / pixelCount; // 0..255
+
+        // Approximate lux mapping (still relative due to camera auto-exposure)
+        let rawLux = (avgLuminance / 255) * 500;
+        rawLux = Math.pow(rawLux, 1.5);
+        const finalLux = rawLux * calibrationFactor * 10;
+
+        // Nearest hundreds
+        const luxRounded = Math.round(finalLux / 100) * 100;
+        luxDisplay.textContent = luxRounded;
+
+        // restart 5s progress indicator each reading
+        restartTimerBar();
+      }
+    }
+  </script>
 </body>
 </html>
-
-
